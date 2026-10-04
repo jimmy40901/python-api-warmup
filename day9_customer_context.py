@@ -1,13 +1,23 @@
-#Tool Calling骨架
+# 將 dataclass 和 Tool Calling 結合，讓 AI 可以根據新舊客戶動態調整語氣與策略
 
 import os
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from dataclasses import dataclass
 
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key)
+
+# ---------- 客戶資料模板 ----------
+
+@dataclass
+class Customer:
+    name: str
+    is_new: bool
+    visit_count: int = 0
+    is_birthday_month: bool = False
 
 # ---------- 真實工具函式 ----------
 
@@ -61,21 +71,38 @@ tools = types.Tool(function_declarations=[
     }
 ])
 
+# ---------- 依客戶身分，動態組出 System Prompt ----------
+
+def build_system_prompt(customer: Customer) -> str:
+    base = "你是一間髮廊的客服人員，語氣親切，只回答跟營業時間、服務價格有關的問題。"
+
+    if customer.is_new:
+        extra = "這位是新客，請特別介紹一下我們的服務，並歡迎他第一次光臨。"
+    elif customer.visit_count >= 5:
+        extra = f"這位是熟客（已經來訪 {customer.visit_count} 次），可以用更輕鬆熟悉的語氣對話，並主動提及老客戶有 9 折優惠。"
+    else:
+        extra = "這位是一般舊客，正常親切應對即可。"
+
+    return base + extra
+
 # ---------- 把整套流程包成可重複呼叫的函式 ----------
 
-def ask(question: str) -> str:
+def ask(question: str, customer: Customer) -> str:
+    system_prompt = build_system_prompt(customer)
+
     response = client.models.generate_content(
         model="gemini-3.5-flash-lite",
         contents=question,
-        config=types.GenerateContentConfig(tools=[tools])
+        config=types.GenerateContentConfig(
+            tools=[tools],
+            system_instruction=system_prompt
+        )
     )
     part = response.candidates[0].content.parts[0]
 
-    # 如果不需要呼叫工具，則直接回應
     if part.function_call is None:
         return response.text
 
-    # 要呼叫工具：先判斷 Gemini 要的是哪一個，再真的去執行
     function_call = part.function_call
     if function_call.name == "check_opening_hours":
         tool_result = check_opening_hours(**function_call.args)
@@ -95,12 +122,21 @@ def ask(question: str) -> str:
                 )]
             )
         ],
-        config=types.GenerateContentConfig(tools=[tools])
+        config=types.GenerateContentConfig(
+            tools=[tools],
+            system_instruction=system_prompt
+        )
     )
     return final_response.text
 
 # ---------- 測試 ----------
 
-print(ask("你們禮拜天有營業嗎？"))
-print(ask("你好"))
-print(ask("剪髮多少錢？"))
+new_customer = Customer(name="小明", is_new=True)
+loyal_customer = Customer(name="小華", is_new=False, visit_count=6)
+regular_customer = Customer(name="小美", is_new=False, visit_count=2)
+
+print(ask("剪髮多少錢？", new_customer))
+print("---")
+print(ask("剪髮多少錢？", loyal_customer))
+print("---")
+print(ask("剪髮多少錢？", regular_customer))
