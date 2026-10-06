@@ -1,4 +1,4 @@
-from typing import TypedDict #LandGraph要求要使用的格式
+from typing import TypedDict #LangGraph要求要使用的格式
 
 class BookingState(TypedDict):
     service: str
@@ -35,3 +35,51 @@ app = graph.compile() #將這個圖編譯成可以執行的東西，之後讓LLM
 initial_state = {"service": "剪髮", "day": "禮拜一", "is_available": False}
 result = app.invoke(initial_state)
 print(result)
+
+#-------加入條件邊，讓他有分岔的能力-------
+def route_after_check(state: BookingState) -> str:
+    if state['is_available']:  #函式的輸入一樣是state，但回傳的跟Node不一樣，Node是字典，他是迴船要到的Node的名字
+        return "confirm_booking"
+    else:
+        return "suggest_reschedule"
+
+#-------加入新的Node----------
+def confirm_booking(state: BookingState) -> dict:
+    print(f"已為您確認預約：{state['service']}，{state['day']}")
+    return {}
+
+def suggest_reschedule(state: BookingState) -> dict:
+    print(f"很抱歉，{state['day']} 公休，建議您改約其他時間")
+    return {}
+
+graph = StateGraph(BookingState)
+
+graph.add_node("ask_service", ask_service)
+graph.add_node("check_availability", check_availability)
+graph.add_node("confirm_booking", confirm_booking)
+graph.add_node("suggest_reschedule", suggest_reschedule)
+
+graph.set_entry_point("ask_service")
+graph.add_edge("ask_service", "check_availability")
+
+graph.add_conditional_edges(
+    "check_availability", #從哪個Node開始
+    route_after_check,  #用哪個判斷函式
+    {
+        "confirm_booking": "confirm_booking", #看函式回傳的字串可以對應到哪個Node，並執行該Node對應的動作
+        "suggest_reschedule": "suggest_reschedule"
+    }
+)
+
+graph.add_edge("confirm_booking", END)
+graph.add_edge("suggest_reschedule", END)
+
+app = graph.compile()
+
+print("=== 測試 1：禮拜一（公休） ===")
+result1 = app.invoke({"service": "剪髮", "day": "禮拜一", "is_available": False})
+print(result1)
+
+print("=== 測試 2：禮拜二（有營業） ===")
+result2 = app.invoke({"service": "染髮", "day": "禮拜二", "is_available": False})
+print(result2)
