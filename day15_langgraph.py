@@ -108,7 +108,6 @@ graph.add_conditional_edges(
 
 graph.add_edge("confirm_booking", END)
 graph.add_edge("suggest_reschedule", END)
-
 app = graph.compile()  # 將這個圖編譯成可以執行的東西
 
 # ---------- 測試 ----------
